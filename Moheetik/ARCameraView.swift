@@ -73,17 +73,14 @@ struct ARCameraView: UIViewRepresentable {
             
             frameCounter += 1
             
-            // Priority 1: Track existing anchor (fast path)
             if let anchor = lockedAnchor {
                 trackAnchor(anchor, frame: frame)
             }
             
-            // Priority 2: Create pending anchor (every frame for responsiveness)
             if let boundingBox = pendingAnchorCreation {
                 tryCreateAnchor(for: boundingBox, frame: frame)
             }
             
-            // Priority 3: Run detection (throttled to every 8 frames for performance)
             guard frameCounter % 8 == 0 else { return }
             
             let orientation = getExifOrientation()
@@ -96,7 +93,6 @@ struct ARCameraView: UIViewRepresentable {
             
             guard !requests.isEmpty else { return }
             
-            // Run Vision inference (already on ARSession background thread)
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation)
             try? handler.perform(requests)
             
@@ -108,7 +104,6 @@ struct ARCameraView: UIViewRepresentable {
                 combinedResults.append(contentsOf: moheetikResults)
             }
             
-            // Process results (builds labeled objects array)
             self.processResults(combinedResults, frame: frame)
         }
         
@@ -261,7 +256,6 @@ struct ARCameraView: UIViewRepresentable {
             pendingAnchorCreation = nil
         }
         
-        /// Processes detection results from Vision models. ATOMIC update for UI and speech sync.
         func processResults(_ results: [VNRecognizedObjectObservation], frame: ARFrame) {
             let filtered = results.filter { $0.confidence > 0.7 }
             let yoloBoxes = filtered.map { $0.boundingBox }
@@ -278,13 +272,11 @@ struct ARCameraView: UIViewRepresentable {
                 return
             }
             
-            // Navigation objects get MPurple color
             let navigationClasses: Set<String> = [
                 "door", "stairs", "elevator", "elevator_button", "exit", "entrance",
                 "handrail", "ramp", "crossing", "sidewalk"
             ]
             
-            // Build objects with fingerprints
             var initialObjects = filtered.map { prediction -> DetectedObject in
                 let rawLabel = prediction.labels.first?.identifier ?? "Unknown"
                 let isNavigationObject = navigationClasses.contains(rawLabel.lowercased())
@@ -303,10 +295,8 @@ struct ARCameraView: UIViewRepresentable {
                 return obj
             }
             
-            // Sort left-to-right for consistent numbering
             initialObjects.sort { $0.boundingBox.minX < $1.boundingBox.minX }
             
-            // Assign persistent IDs - SINGLE PASS for consistency
             var labeledObjects: [DetectedObject] = []
             let grouped = Dictionary(grouping: initialObjects, by: { $0.rawLabel })
             
@@ -318,10 +308,8 @@ struct ARCameraView: UIViewRepresentable {
                     let size = obj.boundingBox.width * obj.boundingBox.height
                     visibleCenters.append(center)
                     
-                    // Get persistent ID - this is the SINGLE SOURCE OF TRUTH
                     let persistentID = self.sessionTracker.assignID(forClass: key, center: center, size: size)
-                    
-                    // Build label ONCE - used for both UI and speech
+
                     if self.sessionTracker.currentCount(forClass: key) > 1 {
                         obj.label = "\(key.capitalized) \(persistentID)"
                     } else {
@@ -333,14 +321,11 @@ struct ARCameraView: UIViewRepresentable {
                 self.sessionTracker.markFrameEnd(forClass: key, visibleCenters: visibleCenters)
             }
             
-            // Capture final labeled objects for atomic update
             let finalObjects = labeledObjects
             let finalBoxes = yoloBoxes
             let finalClasses = yoloClasses
             
-            // SINGLE ATOMIC UPDATE - ensures UI and speech use same data
             DispatchQueue.main.async {
-                // Update YOLO data for visual confirmation
                 self.vm.updateYOLODetections(boxes: finalBoxes, classNames: finalClasses)
                 
                 // Skip if anchor is active
@@ -401,13 +386,11 @@ struct ARCameraView: UIViewRepresentable {
                         }
                     }
                 } else {
-                    // No target selected - show all detected objects
                     self.removeLockedAnchor()
                     if self.targetLock.isLocked || self.targetLock.isInSearchMode {
                         self.targetLock.unlock()
                         self.sessionTracker.resetSession()
                     }
-                    // Use finalObjects - SAME data for UI and speech
                     self.vm.updateDetections(finalObjects)
                 }
             }

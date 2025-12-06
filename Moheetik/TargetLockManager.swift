@@ -257,10 +257,8 @@ final class TargetLockManager {
     }
 }
 
-/// Tracks persistent object IDs across frames to prevent ID jumping.
 final class SessionIDTracker {
     
-    /// Represents a tracked object instance with position history.
     private struct TrackedInstance {
         let id: Int
         var center: CGPoint
@@ -269,27 +267,16 @@ final class SessionIDTracker {
         var framesMissed: Int
     }
     
-    /// Counter for next available ID per class.
     private var classCounters: [String: Int] = [:]
-    
-    /// Known objects per class with position tracking.
     private var knownObjects: [String: [TrackedInstance]] = [:]
-    
-    /// Distance threshold for matching - INCREASED for stability.
     private let sameObjectThreshold: CGFloat = 0.35
-    
-    /// Maximum frames an object can be missing before being forgotten.
     private let maxMissedFrames: Int = 60
-    
-    /// Maximum time (seconds) to remember an object that left the frame.
     private let maxMemoryTime: TimeInterval = 10.0
-    
-    /// Assigns a persistent ID to an object, reusing existing ID if position matches.
+
     func assignID(forClass className: String, center: CGPoint, size: CGFloat) -> Int {
         let key = className.lowercased()
         let now = Date()
         
-        // Try to match with existing known object FIRST (before cleanup)
         if let known = knownObjects[key], !known.isEmpty {
             var bestMatchIndex: Int? = nil
             var bestMatchDistance: CGFloat = .greatestFiniteMagnitude
@@ -297,7 +284,6 @@ final class SessionIDTracker {
             for (index, obj) in known.enumerated() {
                 let distance = hypot(center.x - obj.center.x, center.y - obj.center.y)
                 
-                // FAST PATH: Accept first match within tight threshold
                 if distance < 0.15 {
                     knownObjects[key]![index].center = center
                     knownObjects[key]![index].size = size
@@ -306,7 +292,6 @@ final class SessionIDTracker {
                     return obj.id
                 }
                 
-                // Track best match within wider threshold
                 if distance < sameObjectThreshold && distance < bestMatchDistance {
                     let sizeRatio = size > 0 ? max(obj.size / size, size / obj.size) : 1.0
                     if sizeRatio < 4.0 {
@@ -316,7 +301,6 @@ final class SessionIDTracker {
                 }
             }
             
-            // Found a match - update position and return existing ID
             if let matchIndex = bestMatchIndex {
                 let existingID = known[matchIndex].id
                 knownObjects[key]![matchIndex].center = center
@@ -327,10 +311,8 @@ final class SessionIDTracker {
             }
         }
         
-        // Cleanup stale objects AFTER matching (prevents premature deletion)
         cleanupStaleObjects(forClass: key, now: now)
         
-        // No match found - create new ID
         let nextID = (classCounters[key] ?? 0) + 1
         classCounters[key] = nextID
         
@@ -350,7 +332,6 @@ final class SessionIDTracker {
         return nextID
     }
     
-    /// Marks objects not seen in current frame (call once per frame after processing).
     func markFrameEnd(forClass className: String, visibleCenters: [CGPoint]) {
         let key = className.lowercased()
         guard var known = knownObjects[key] else { return }
@@ -368,7 +349,6 @@ final class SessionIDTracker {
         }
     }
     
-    /// Removes objects that haven't been seen for too long.
     private func cleanupStaleObjects(forClass key: String, now: Date) {
         guard var known = knownObjects[key] else { return }
         
@@ -378,18 +358,15 @@ final class SessionIDTracker {
         }
     }
     
-    /// Resets all tracking state for a new session.
     func resetSession() {
         classCounters.removeAll()
         knownObjects.removeAll()
     }
     
-    /// Returns the total count of unique IDs assigned for a class.
     func currentCount(forClass className: String) -> Int {
         return classCounters[className.lowercased()] ?? 0
     }
     
-    /// Returns currently visible object count for a class.
     func visibleCount(forClass className: String) -> Int {
         let key = className.lowercased()
         guard let known = knownObjects[key] else { return 0 }

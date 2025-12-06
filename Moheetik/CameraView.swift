@@ -77,13 +77,9 @@ class CameraViewModel: NSObject, ObservableObject {
     private var lostTimestamp: Date? = nil
     private var lastGuidanceTime: Date? = nil
     private var wasReacquired: Bool = false
-    /// Vision request for YOLOv3 object detection.
+
     var yoloRequest: VNCoreMLRequest?
-    
-    /// Vision request for MoheetikModel object detection.
     var moheetikRequest: VNCoreMLRequest?
-    
-    /// Callback to reset ARSession when needed.
     var onSessionReset: (() -> Void)?
     
     override init() {
@@ -106,7 +102,7 @@ class CameraViewModel: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { print("🔊 Reset Audio Error: \(error)") }
     }
-    /// Loads both YOLOv3 and MoheetikModel for multi-model detection.
+    /// Both YOLOv3 and MoheetikModel.
     private func setupModel() async {
         let yoloTask = Task.detached(priority: .userInitiated) { () -> VNCoreMLModel? in
             do {
@@ -168,7 +164,7 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
 
-    /// Extracts target object name from spoken text with synonym support.
+    /// Target object name from spoken text.
     private func extractTargetFromSpeech(text: String) -> String? {
         // YOLOv3 classes
         let yoloObjects = [
@@ -191,7 +187,7 @@ class CameraViewModel: NSObject, ObservableObject {
             "handrail", "ramp", "crossing", "sidewalk"
         ]
         
-        // Synonyms: spoken word → model class name
+        // Spoken word → model class name
         let synonyms: [String: String] = [
             "lift": "elevator",
             "steps": "stairs",
@@ -208,10 +204,8 @@ class CameraViewModel: NSObject, ObservableObject {
                 else if text.contains("two") || text.contains("2") { numberSuffix = " 2" }
                 else if text.contains("three") || text.contains("3") { numberSuffix = " 3" }
                 
-                // Apply synonym mapping first
                 var cleanName = synonyms[obj] ?? obj
                 
-                // Then apply legacy mappings
                 if cleanName == "table" { cleanName = "diningtable" }
                 if cleanName == "tv" { cleanName = "tvmonitor" }
                 if cleanName == "phone" || cleanName == "mobile" { cleanName = "cell phone" }
@@ -244,13 +238,9 @@ class CameraViewModel: NSObject, ObservableObject {
         loadingText = "Starting... Hold steady"
         resetAllTrackingState()
         onSessionReset?()
-        
         withAnimation { state = .speaking }
-        
-        // Use speakFinal for startup (bypasses state guard)
         speakFinal(text: loadingText)
-        
-        // FALLBACK: Force transition after 1.5 seconds if speech fails/muted
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self = self else { return }
             if self.state == .speaking && self.nextStateAfterSpeaking == .recording {
@@ -260,25 +250,15 @@ class CameraViewModel: NSObject, ObservableObject {
     }
     
     private func stopRecording() {
-        // CRITICAL: Stop speech immediately as FIRST action
         synthesizer.stopSpeaking(at: .immediate)
-        
-        // Clear speech state to prevent ghost speech
         lastSpokenText = ""
-        
-        // Set state to idle FIRST to block any pending speak() calls
         nextStateAfterSpeaking = .idle
         loadingText = "Finished"
-        
-        // Reset all tracking (also clears lastSpokenText)
         resetAllTrackingState()
         onSessionReset?()
-        
-        // Now transition to speaking state for final announcement
         withAnimation { state = .speaking }
         speakFinal(text: loadingText)
         
-        // FALLBACK: Force transition after 1.5 seconds if speech fails/muted
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self = self else { return }
             if self.state == .speaking && self.nextStateAfterSpeaking == .idle {
@@ -287,7 +267,6 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
-    /// Special speak function for final announcements (ignores state guard)
     private func speakFinal(text: String) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
@@ -561,9 +540,8 @@ class CameraViewModel: NSObject, ObservableObject {
         }
         }
     
-    /// Speaks text only during active recording session.
+    
     private func speak(text: String, force: Bool) {
-        // STRICT GUARD: Only speak during active recording
         guard state == .recording else { return }
         guard !speechManager.isRecording else { return }
         
