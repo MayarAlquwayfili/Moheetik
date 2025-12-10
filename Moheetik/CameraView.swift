@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 import AVFoundation
 import Combine
 import Vision
@@ -14,12 +15,14 @@ import CoreML
 import ARKit
  
 
+/// High-level camera states for the app flow.
 enum CameraState: Equatable, Sendable {
     case idle
     case speaking
     case recording
 }
 
+/// Simple RGB fingerprint for re-identifying objects.
 struct ColorFingerprint: Sendable {
     let r: CGFloat
     let g: CGFloat
@@ -35,6 +38,7 @@ struct ColorFingerprint: Sendable {
     }
 }
 
+/// Holds one detected object's info for overlays and speech.
 struct DetectedObject: Identifiable, Sendable {
     let id = UUID()
     var label: String
@@ -47,48 +51,100 @@ struct DetectedObject: Identifiable, Sendable {
  
 
 @MainActor
+/// Main brain that controls camera, AR, and speech.
 class CameraViewModel: NSObject, ObservableObject {
+    private var cancellables = Set<AnyCancellable>()
+    /// Last time we announced a specific label.
+    private var lastAnnouncementTime: [String: Date] = [:]
+    /// Current camera state for UI.
     @Published var state: CameraState = .idle
+    /// Unused flag for possible front camera switch.
     @Published var isFrontCamera: Bool = false
+    /// Loading message while preparing.
     @Published var loadingText: String = ""
+    /// Objects currently drawn on screen.
     @Published var detectedObjects: [DetectedObject] = []
+    /// The target object name chosen by voice.
     @Published var targetObject: String? = nil
-    @Published var speechManager = SpeechManager()
+    /// Speech manager handling mic and STT.
+    @Published var speechManager = SpeechManager.shared
+    /// Locked anchor ID if one exists.
     @Published var lockedAnchorID: UUID? = nil
+    /// Current distance to locked target.
     @Published var targetDistance: Float? = nil
+    /// True when AR anchor is visible.
     @Published var isAnchorVisible: Bool = false
+    /// Screen position of the anchor.
     @Published var anchorScreenPosition: CGPoint? = nil
+    /// True when vision confirms the anchor.
     @Published var isVisuallyConfirmed: Bool = false
+    /// Last known box size for locked anchor.
     var lastKnownBoundingBoxSize: CGSize = CGSize(width: 0.15, height: 0.2)
+    /// Display label for locked anchor.
     var lockedAnchorLabel: String? = nil
+    /// Mapping of anchor IDs to labels.
     var anchorLabels: [UUID: String] = [:]
+    /// Raw YOLO boxes for visual confirmation.
     var currentYOLODetections: [CGRect] = []
+    /// Raw YOLO class names for confirmation.
     var currentYOLOClassNames: [String] = []
+    /// Helper that builds guidance phrases.
     private let navigationManager = NavigationManager()
+    /// Last screen size for overlay math.
     var lastScreenSize: CGSize = .zero
+    /// Tracks how many frames lost confirmation.
     private var visualConfirmationFailCount: Int = 0
-    private let maxFailFramesBeforeLost: Int = 5
+    /// Max frames before declaring lost.
+    private let maxFailFramesBeforeLost: Int = 60
+    /// Last time anchor was confirmed.
     private var lastConfirmedTime: Date = .distantPast
+    /// Last phrase spoken to avoid repeats.
     private var lastSpokenText: String = ""
+    /// Last announced object list.
+    private var lastAnnouncedObjects: String = ""
+    /// Timestamp when lock was achieved to gate arrival speech.
+    private var lockTime: Date? = nil
+    /// TTS engine for announcements.
     private let synthesizer = AVSpeechSynthesizer()
+    /// Player for UI sound effects (e.g., mic toggle).
+    private var audioPlayer: AVAudioPlayer?
+    /// Next state after a speaking phase.
     private var nextStateAfterSpeaking: CameraState = .idle
+    /// Has arrival been announced once.
     private var hasAnnouncedArrival: Bool = false
+    /// Has loss been announced once.
     private var hasAnnouncedLost: Bool = false
+    /// When the target was lost.
     private var lostTimestamp: Date? = nil
+    /// Last time we gave guidance.
     private var lastGuidanceTime: Date? = nil
+    /// Whether we re-found the target.
     private var wasReacquired: Bool = false
+    /// Request to run ML immediately.
+    @Published var requestImmediateInference: Bool = false
 
+    /// CoreML YOLO request.
     var yoloRequest: VNCoreMLRequest?
+    /// Custom model request.
     var moheetikRequest: VNCoreMLRequest?
+    /// Callback to reset AR session.
     var onSessionReset: (() -> Void)?
     
+    /// Sets up audio, language, and ML models.
     override init() {
         super.init()
+        LocalizationManager.refreshLanguage()
         synthesizer.delegate = self
         setupAudioSession()
         Task(priority: .high) { await setupModel() }
+        speechManager.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
     }
     
+    /// Prepares the audio session for recording and playback.
     private func setupAudioSession() {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
@@ -96,13 +152,43 @@ class CameraViewModel: NSObject, ObservableObject {
         } catch { print("🔊 Audio Error: \(error)") }
     }
     
+    /// Switches audio session to playback after recording.
     func resetAudioSessionForPlayback() {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { print("🔊 Reset Audio Error: \(error)") }
     }
+
+    func playSound() {
+        // Configure session for playback
+        try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+
+        // Try to find the file
+        let soundName = "mic_button_press"
+        let soundExt = "mp3"
+        var soundURL = Bundle.main.url(forResource: soundName, withExtension: soundExt)
+        if soundURL == nil {
+            soundURL = Bundle.main.url(forResource: soundName, withExtension: soundExt, subdirectory: "Sounds")
+        }
+
+        guard let url = soundURL else {
+            print("🔊 Error: Sound file '\(soundName).\(soundExt)' not found in Bundle.")
+            return
+        }
+
+        do {
+            audioPlayer = try AVAudioPlayer(contentsOf: url)
+            audioPlayer?.volume = 1.0
+            audioPlayer?.prepareToPlay()
+            audioPlayer?.play()
+        } catch {
+            print("🔊 Audio Player Error: \(error)")
+        }
+    }
     /// Both YOLOv3 and MoheetikModel.
+    /// Loads the ML models asynchronously.
     private func setupModel() async {
         let yoloTask = Task.detached(priority: .userInitiated) { () -> VNCoreMLModel? in
             do {
@@ -139,33 +225,40 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Handles the main start/stop UI button.
     func mainButtonTapped() {
+        synthesizer.stopSpeaking(at: .immediate)
         state == .idle ? startSequence() : stopRecording()
     }
     
+    /// Starts or stops the microphone for voice commands.
     func toggleMicrophone() {
+        synthesizer.stopSpeaking(at: .immediate)
+        LocalizationManager.refreshLanguage()
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        playSound()
         if speechManager.isRecording {
             speechManager.stopRecording()
-            resetAudioSessionForPlayback()
-            
-            let spokenText = speechManager.detectedText.lowercased()
-            print("User said: \(spokenText)")
-            
-            if let target = extractTargetFromSpeech(text: spokenText) {
-                setTarget(target)
-            } else {
-                speak(text: "Could not understand. Try 'Chair 1'.", force: true)
-            }
+            processRecordedText()
         } else {
             synthesizer.stopSpeaking(at: .immediate)
+            detectedObjects = []
             speechManager.detectedText = ""
+            synthesizer.stopSpeaking(at: .immediate)
             speechManager.startRecording()
         }
     }
 
     /// Target object name from spoken text.
+    /// Pulls a target object name from spoken text.
     private func extractTargetFromSpeech(text: String) -> String? {
+        if LocalizationManager.isArabic || LocalizationManager.containsArabicCharacters(text) {
+            if let arabicMatch = LocalizationManager.matchArabicCommand(text) {
+                let numberSuffix = LocalizationManager.extractNumber(from: text).map { " \($0)" } ?? ""
+                return arabicMatch.capitalized + numberSuffix
+            }
+        }
+        
         // YOLOv3 classes
         let yoloObjects = [
             "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
@@ -217,25 +310,47 @@ class CameraViewModel: NSObject, ObservableObject {
               }
               return nil
           }
+
+    private func processRecordedText() {
+        // 1. Stop playback & Get text
+        resetAudioSessionForPlayback()
+        let spokenText = speechManager.detectedText.lowercased()
+        print("User said: \(spokenText)")
+        
+        // 2. Check Dictionary
+        if let target = extractTargetFromSpeech(text: spokenText) {
+            // Found! Start Search.
+            setTarget(target)
+            lastAnnouncementTime.removeAll()
+            requestImmediateInference = true
+        } else {
+            // Not Found! Speak Error.
+            let errorMsg = LocalizationManager.localizeStatus("Could not understand. Try 'Chair 1'.")
+            speak(text: errorMsg, force: true)
+        }
+    }
       
+    /// Stores the chosen target and announces search.
     private func setTarget(_ name: String) {
         lockedAnchorID = nil
         targetDistance = nil
         isAnchorVisible = false
         anchorScreenPosition = nil
-        lockedAnchorLabel = name
+        lockedAnchorLabel = LocalizationManager.localizeForSpeech(name)
         hasAnnouncedArrival = false
         hasAnnouncedLost = false
         lostTimestamp = nil
         wasReacquired = false
+        lastAnnouncedObjects = ""
         
         targetObject = name
         speak(text: "Searching for \(name)", force: true)
     }
      
+    /// Starts scanning: resets, speaks loading, then begins recording.
     private func startSequence() {
         nextStateAfterSpeaking = .recording
-        loadingText = "Starting... Hold steady"
+        loadingText = LocalizationManager.localizeStatus("Starting... Hold steady")
         resetAllTrackingState()
         onSessionReset?()
         withAnimation { state = .speaking }
@@ -249,15 +364,18 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
-    private func stopRecording() {
+    /// Stops scanning: resets tracking and optionally speaks finished.
+    private func stopRecording(shouldSpeak: Bool = true) {
         synthesizer.stopSpeaking(at: .immediate)
         lastSpokenText = ""
         nextStateAfterSpeaking = .idle
-        loadingText = "Finished"
+        loadingText = LocalizationManager.localizeStatus("Finished")
         resetAllTrackingState()
         onSessionReset?()
         withAnimation { state = .speaking }
-        speakFinal(text: loadingText)
+        if shouldSpeak {
+            speakFinal(text: loadingText)
+        }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self = self else { return }
@@ -267,13 +385,25 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Speaks a message during the speaking state.
     private func speakFinal(text: String) {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.5
-        synthesizer.speak(utterance)
+        let localized = LocalizationManager.localizeOutput(text)
+        
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: localized)
+        } else {
+            let utterance = makeUtterance(localized)
+            synthesizer.speak(utterance)
+        }
+    }
+
+    /// Stops current speech and clears overlays immediately.
+    func stopSpeakingImmediate() {
+        synthesizer.stopSpeaking(at: .immediate)
+        detectedObjects = []
     }
     
+    /// Clears all target and detection state.
     private func resetAllTrackingState() {
         targetObject = nil
         detectedObjects = []
@@ -292,18 +422,21 @@ class CameraViewModel: NSObject, ObservableObject {
         lastGuidanceTime = nil
         wasReacquired = false
         lastSpokenText = ""
+        lastAnnouncedObjects = ""
         visualConfirmationFailCount = 0
         lastConfirmedTime = .distantPast
         navigationManager.reset()
     }
     
     
+    /// Called when an AR anchor is successfully placed.
     func anchorCreated(id: UUID, boundingBoxSize: CGSize) {
         lockedAnchorID = id
         lastKnownBoundingBoxSize = boundingBoxSize
         hasAnnouncedLost = false
         lostTimestamp = nil
         lastGuidanceTime = nil
+        lockTime = Date()
         
         
         if let label = lockedAnchorLabel {
@@ -315,15 +448,18 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Returns the display label for a locked anchor.
     func getLabelForAnchor(id: UUID) -> String? {
         return anchorLabels[id]
     }
     
+    /// Saves raw YOLO detections for confirmation logic.
     func updateYOLODetections(boxes: [CGRect], classNames: [String]) {
         currentYOLODetections = boxes
         currentYOLOClassNames = classNames
     }
     
+    /// Checks if YOLO detections align with the anchor position.
     func checkVisualConfirmation(anchorScreenPosition: CGPoint, screenSize: CGSize, targetClass: String) -> Bool {
         if currentYOLODetections.isEmpty {
             return true
@@ -336,7 +472,7 @@ class CameraViewModel: NSObject, ObservableObject {
         let targetBase = targetClass.components(separatedBy: " ").first?.lowercased() ?? ""
         
         for (index, box) in currentYOLODetections.enumerated() {
-            let expandedBox = box.insetBy(dx: -0.1, dy: -0.1)
+            let expandedBox = box.insetBy(dx: -0.2, dy: -0.2)
             
             if expandedBox.contains(anchorPoint) {
                 let detectedClass = currentYOLOClassNames[safe: index]?.lowercased() ?? ""
@@ -352,7 +488,7 @@ class CameraViewModel: NSObject, ObservableObject {
                 let box = currentYOLODetections[index]
                 let boxCenter = CGPoint(x: box.midX, y: box.midY)
                 let distance = hypot(anchorPoint.x - boxCenter.x, anchorPoint.y - boxCenter.y)
-                if distance < 0.3 {
+                if distance < 0.5 {
                     return true
                 }
             }
@@ -361,6 +497,7 @@ class CameraViewModel: NSObject, ObservableObject {
         return false
     }
     
+    /// Updates distance, visibility, and guidance for the locked target.
     func updateAnchorTracking(
         distance: Float,
         screenPosition: CGPoint?,
@@ -380,6 +517,7 @@ class CameraViewModel: NSObject, ObservableObject {
         guard let target = targetObject else { return }
         
         let closeRangeOverride = distance < 1.5
+        let closeRangeTrust = distance < 2.0
         
         var rawConfirmed = false
         if isVisible, let pos = screenPosition {
@@ -390,6 +528,10 @@ class CameraViewModel: NSObject, ObservableObject {
             )
         }
         if closeRangeOverride && isVisible {
+            visualConfirmationFailCount = 0
+            lastConfirmedTime = Date()
+            isVisuallyConfirmed = true
+        } else if closeRangeTrust && isVisible {
             visualConfirmationFailCount = 0
             lastConfirmedTime = Date()
             isVisuallyConfirmed = true
@@ -422,7 +564,8 @@ class CameraViewModel: NSObject, ObservableObject {
             return
         }
         
-        if distance < 0.8 && isVisible && !hasAnnouncedArrival {
+        if distance < 0.4 && isVisible && !hasAnnouncedArrival {
+            guard let lockTime = lockTime, Date().timeIntervalSince(lockTime) > 2.0 else { return }
             hasAnnouncedArrival = true
             let msg = "You have arrived at \(target). Scanning finished."
             lastSpokenText = msg
@@ -430,7 +573,7 @@ class CameraViewModel: NSObject, ObservableObject {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.stopRecording()
+                self?.stopRecording(shouldSpeak: false)
             }
             return
         }
@@ -476,6 +619,7 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Speaks guidance when the target is lost from view.
     private func handleTargetNotVisible(target: String) {
         let now = Date()
         
@@ -495,22 +639,47 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Updates overlays and speaks object names when no target is active.
     func updateDetections(_ objects: [DetectedObject]) {
-        self.detectedObjects = objects
+        // 1. ABSOLUTE AGGRESSIVE SILENCE GUARD
+        // If mic is recording, kill any speech immediately, clear visual objects, and exit.
+        if speechManager.isRecording {
+            if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+            if !self.detectedObjects.isEmpty { self.detectedObjects = [] }
+            return
+        }
+        
+        // 2. State Guard: Only process if we are actually recording video
+        guard state == .recording else { return }
+        let localizedObjects = localizeObjectsIfNeeded(objects)
+        self.detectedObjects = localizedObjects
 
         if targetObject != nil && lockedAnchorID != nil {
             return
         }
-    
-        if targetObject == nil {
-            let labels = objects.map { $0.label }.sorted().joined(separator: ", ")
-            if !labels.isEmpty && labels != lastSpokenText {
-                lastSpokenText = labels
-                speak(text: labels, force: false)
-            }
+
+        let labels = localizedObjects.map { $0.label }.sorted().joined(separator: ", ")
+        guard !labels.isEmpty else { return }
+
+        // 1. Strict Time Check (10 seconds silence required between same/similar objects)
+        let now = Date()
+        if let lastTime = lastAnnouncementTime[labels], now.timeIntervalSince(lastTime) < 10.0 { return }
+
+        // 2. Similarity Check (The "Shake" Fix)
+        // If the new list contains the old one or vice versa (e.g., "Chair" vs "Chair, Table"), TREAT AS SAME.
+        if labels.contains(lastAnnouncedObjects) || lastAnnouncedObjects.contains(labels) {
+            // Just update timestamp to keep it silent, DO NOT SPEAK
+            lastAnnouncementTime[labels] = now
+            return
         }
+
+        // 3. Speak only if truly new
+        lastAnnouncementTime[labels] = now
+        lastAnnouncedObjects = labels
+        speak(text: labels, force: false)
     }
     
+    /// Forces a "target lost" warning and clears overlays.
     func notifyTargetLost() {
             let warning = "Target lost. Move back."
             if lastSpokenText != warning {
@@ -521,6 +690,7 @@ class CameraViewModel: NSObject, ObservableObject {
             self.detectedObjects = []
         }
         
+        /// Haptic feedback based on object size on screen.
         private func triggerHaptic(size: CGFloat) {
             if size > 0.3 {
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
@@ -530,6 +700,7 @@ class CameraViewModel: NSObject, ObservableObject {
             }
         }
     
+    /// Haptic feedback based on distance to the anchor.
     private func triggerDistanceHaptic(distance: Float) {
         if distance < 1.0 {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
@@ -541,9 +712,10 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     
     
-    private func speak(text: String, force: Bool) {
-        guard state == .recording else { return }
-        guard !speechManager.isRecording else { return }
+    /// Speaks a message if not currently recording speech input.
+    private func speak(text: String, force: Bool, forceArabic: Bool = false) {
+        guard state == .recording || force else { return }
+        if speechManager.isRecording && !force { return }
         
         if force {
             if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
@@ -551,9 +723,8 @@ class CameraViewModel: NSObject, ObservableObject {
             if synthesizer.isSpeaking { return }
         }
         
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.5
+        let localized = LocalizationManager.localizeOutput(text)
+        let utterance = makeUtterance(localized, forceArabic: forceArabic)
         synthesizer.speak(utterance)
     }
 }
@@ -614,7 +785,9 @@ struct FullCameraView: View {
                 
                 if vm.state == .recording {
                     DetectionOverlay(objects: vm.detectedObjects, screenSize: geometry)
+                        .environment(\.layoutDirection, .leftToRight)
                         .ignoresSafeArea()
+                        .accessibilityHidden(true)
                 }
                 
                 VStack {
@@ -632,7 +805,7 @@ struct FullCameraView: View {
                             .cornerRadius(10)
                             .padding(.top, 20)
                     } else if let target = vm.targetObject {
-                        Text("Looking for: \(target)")
+                        Text(LocalizationManager.localizeOutput("Looking for: \(target)"))
                             .font(.headline)
                             .padding(8)
                             .background(Color.mGreen)
@@ -657,6 +830,7 @@ struct FullCameraView: View {
                                             .foregroundColor(.white)
                                     }
                                 }
+                                .accessibilityLabel(LocalizationManager.localizeStatus(vm.speechManager.isRecording ? "Stop Listening" : "Voice Command"))
                                 .disabled(vm.state == .idle)
                                 .opacity(vm.state == .idle ? 0 : 1)
                                 
@@ -668,6 +842,7 @@ struct FullCameraView: View {
                                             .frame(width: vm.state == .recording ? 40 : 70, height: vm.state == .recording ? 40 : 70)
                                     }
                                 }
+                                .accessibilityLabel(LocalizationManager.localizeStatus(vm.state == .recording ? "Stop Scanning" : "Start Scanning"))
                                 
                                 ZStack { Circle().fill(Color.black).frame(width: 50, height: 50) }
                                     .opacity(0)
@@ -695,6 +870,7 @@ struct FullCameraView: View {
                 }
             }
         }
+        .accessibilityAction(.magicTap) { vm.mainButtonTapped() }
         .edgesIgnoringSafeArea(.all)
         .animation(.default, value: vm.state)
     }
@@ -703,6 +879,33 @@ struct FullCameraView: View {
 extension Array {
     subscript(safe index: Int) -> Element? {
         return indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - Speech helpers
+private extension CameraViewModel {
+    func localizeObjectsIfNeeded(_ objects: [DetectedObject]) -> [DetectedObject] {
+        guard LocalizationManager.isArabic else { return objects }
+        return objects.map { obj in
+            var copy = obj
+            let localized = LocalizationManager.localizedName(for: obj.rawLabel.lowercased())
+            copy.label = localized.capitalized
+            return copy
+        }
+    }
+    
+    /// Builds a speech utterance with the right language and speed.
+    func makeUtterance(_ text: String, forceArabic: Bool = false) -> AVSpeechUtterance {
+        let utterance = AVSpeechUtterance(string: text)
+        let useArabic = forceArabic || LocalizationManager.isArabic
+        if useArabic {
+            utterance.voice = AVSpeechSynthesisVoice(language: "ar-SA")
+            utterance.rate = 0.7
+        } else {
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+            utterance.rate = 0.6
+        }
+        return utterance
     }
 }
 
