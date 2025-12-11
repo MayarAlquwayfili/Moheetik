@@ -1,2 +1,6 @@
 *.mlmodel
-*.mlmodel
+*.mlpackage
+.DS_Store
+.os_mac
+UserInterfaceState.xcuserstate
+xcuserdata/

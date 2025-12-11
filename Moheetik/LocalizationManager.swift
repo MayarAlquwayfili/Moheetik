@@ -278,13 +278,16 @@ struct LocalizationManager {
         return output
     }
     
-    /// Map common UI/status English phrases to Arabic.
-    /// Maps common status phrases to Arabic.
+    /// Maps common status phrases to Arabic, prioritizing longer phrases first.
     static func localizeStatus(_ text: String) -> String {
         guard isArabic else { return text }
         var output = text
-        for (english, arabic) in statusTranslations {
-            output = output.replacingOccurrences(of: english, with: arabic, options: .caseInsensitive)
+        // Fix: Sort keys by length to translate full phrases first
+        let sortedKeys = statusTranslations.keys.sorted { $0.count > $1.count }
+        for key in sortedKeys {
+            if let arabic = statusTranslations[key] {
+                output = output.replacingOccurrences(of: key, with: arabic, options: .caseInsensitive)
+            }
         }
         return output
     }
@@ -320,20 +323,16 @@ struct LocalizationManager {
         guard isArabic else { return text }
         var output = text
         
-        // Almost there
         output = output.replacingOccurrences(of: "Almost there", with: "اقتربت من الهدف", options: .caseInsensitive)
-        
-        // 1 meter away (singular)
         output = output.replacingOccurrences(of: "1 meter away", with: "متر واحد بعيداً", options: .caseInsensitive)
         
-        // n meters away (numeric)
+        // Fix: Use " فاصلة " for decimals so TTS reads it clearly
         if let range = output.range(of: #"([0-9]+(\.[0-9]+)?)\s+meters away"#, options: .regularExpression) {
             let number = String(output[range]).components(separatedBy: " ").first ?? ""
-            let spokenNumber = number.replacingOccurrences(of: ".", with: ",")
+            let spokenNumber = number.replacingOccurrences(of: ".", with: " فاصلة ")
             output.replaceSubrange(range, with: "\(spokenNumber) متر بعيداً")
         }
         
-        // generic meter away
         output = output.replacingOccurrences(of: "meters away", with: "متر بعيداً", options: .caseInsensitive)
         output = output.replacingOccurrences(of: "meter away", with: "متر بعيداً", options: .caseInsensitive)
         return output

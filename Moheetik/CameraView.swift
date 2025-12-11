@@ -120,6 +120,8 @@ class CameraViewModel: NSObject, ObservableObject {
     private var lastGuidanceTime: Date? = nil
     /// Whether we re-found the target.
     private var wasReacquired: Bool = false
+    /// Last accepted distance to filter out sudden AR distance spikes.
+    private var lastValidDistance: Float = 0
     /// Request to run ML immediately.
     @Published var requestImmediateInference: Bool = false
 
@@ -425,6 +427,7 @@ class CameraViewModel: NSObject, ObservableObject {
         lastAnnouncedObjects = ""
         visualConfirmationFailCount = 0
         lastConfirmedTime = .distantPast
+        lockTime = nil
         navigationManager.reset()
     }
     
@@ -509,6 +512,12 @@ class CameraViewModel: NSObject, ObservableObject {
     ) {
         
         guard state == .recording else { return }
+        
+        // Sanity Check: If distance jumps by more than 5 meters instantly, ignore it.
+        if lastValidDistance > 0 && abs(distance - lastValidDistance) > 5.0 {
+            return
+        }
+        lastValidDistance = distance
         
         self.targetDistance = distance
         self.anchorScreenPosition = screenPosition
@@ -888,8 +897,7 @@ private extension CameraViewModel {
         guard LocalizationManager.isArabic else { return objects }
         return objects.map { obj in
             var copy = obj
-            let localized = LocalizationManager.localizedName(for: obj.rawLabel.lowercased())
-            copy.label = localized.capitalized
+            copy.label = LocalizationManager.localizeForSpeech(obj.label)
             return copy
         }
     }

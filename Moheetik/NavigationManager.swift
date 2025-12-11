@@ -6,22 +6,37 @@
 import Foundation
 import simd
 
+/// Provides simple turn/distance guidance to the target.
 final class NavigationManager {
     
+    /// Last spoken turn message.
     private var lastSpokenDirection: String = ""
+    /// Last spoken distance value.
     private var lastSpokenDistance: Float = 0
+    /// Time last direction was spoken.
     private var lastDirectionTime: Date = .distantPast
+    /// Time last distance was spoken.
     private var lastDistanceTime: Date = .distantPast
-    private let naggingInterval: TimeInterval = 2.5
+    /// Minimum pause between repeats.
+    private let naggingInterval: TimeInterval = 1.5
+    /// Distance change needed to speak again.
     private let distanceChangeThreshold: Float = 0.5
+    /// Screen threshold to decide “left”.
     private let leftThreshold: CGFloat = 0.35
+    /// Screen threshold to decide “right”.
     private let rightThreshold: CGFloat = 0.65
+    /// Re-enter center zone threshold.
     private let centerEnterThreshold: CGFloat = 0.40
+    /// Exit center zone threshold.
     private let centerExitThreshold: CGFloat = 0.60
+    /// Angle considered “facing target”.
     private let bearingAngleThreshold: Float = 10.0
+    /// Angle considered “behind you”.
     private let behindThreshold: Float = 135.0
+    /// Tracks if user is roughly centered.
     private var isInCenterZone: Bool = true
     
+    /// Builds guidance string (turn or distance) for the user.
     func getGuidance(
         userPosition: SIMD3<Float>,
         targetPosition: SIMD3<Float>,
@@ -32,24 +47,35 @@ final class NavigationManager {
         let now = Date()
         let distance = simd_distance(userPosition, targetPosition)
         
-        if let direction = getDirectionGuidance(
+        let direction = getDirectionGuidance(
             screenPoint: screenPoint,
             screenSize: screenSize,
             userPosition: userPosition,
             targetPosition: targetPosition,
             cameraForward: cameraForward,
             now: now
-        ) {
-            return direction
+        )
+        let distanceMsg = getDistanceGuidance(distance: distance, now: now)
+        
+        // Priority 1: Critical Turns (Left/Right/Behind)
+        if let dir = direction, (dir.contains("Turn") || dir.contains("behind")) {
+            return LocalizationManager.localizeOutput(dir)
         }
         
-        if let distanceMsg = getDistanceGuidance(distance: distance, now: now) {
-            return distanceMsg
+        // Priority 2: Distance (Overrides "Move forward")
+        if let dist = distanceMsg {
+            return LocalizationManager.localizeOutput(dist)
+        }
+        
+        // Priority 3: Move forward (Fallback)
+        if let dir = direction {
+            return LocalizationManager.localizeOutput(dir)
         }
         
         return nil
     }
     
+    /// Clears stored timers and counts.
     func reset() {
         lastSpokenDirection = ""
         lastSpokenDistance = 0
@@ -58,6 +84,7 @@ final class NavigationManager {
         isInCenterZone = true
     }
     
+    /// Picks a direction prompt from screen or blind guidance.
     private func getDirectionGuidance(
         screenPoint: CGPoint?,
         screenSize: CGSize,
@@ -83,6 +110,7 @@ final class NavigationManager {
         )
     }
     
+    /// Uses screen position to say left/right/forward.
     private func getScreenBasedDirection(normalizedX: CGFloat, now: Date) -> String? {
         if isInCenterZone {
             if normalizedX < leftThreshold {
@@ -108,6 +136,7 @@ final class NavigationManager {
         }
     }
     
+    /// Uses angles only (no screen) to say left/right/forward.
     private func getBlindNavigationDirection(
         userPosition: SIMD3<Float>,
         targetPosition: SIMD3<Float>,
@@ -151,12 +180,14 @@ final class NavigationManager {
         }
     }
     
+    /// Records and returns the chosen direction phrase.
     private func speakDirection(_ direction: String, now: Date) -> String {
         lastSpokenDirection = direction
         lastDirectionTime = now
         return direction
     }
     
+    /// Decides if distance should be spoken again.
     private func getDistanceGuidance(distance: Float, now: Date) -> String? {
         let timeSinceLastDistance = now.timeIntervalSince(lastDistanceTime)
         let distanceChange = abs(distance - lastSpokenDistance)
@@ -174,6 +205,7 @@ final class NavigationManager {
         return formatDistance(distance)
     }
     
+    /// Formats distance into friendly speech text.
     private func formatDistance(_ meters: Float) -> String {
         if meters < 1.0 {
             return "Almost there"
@@ -182,7 +214,8 @@ final class NavigationManager {
             if rounded == 1.0 {
                 return "1 meter away"
             } else {
-                return String(format: "%.1f meters away", rounded)
+                let formatted = String(format: "%.1f", rounded)
+                return "\(formatted) meters away"
             }
         } else {
             let rounded = Int(meters.rounded())

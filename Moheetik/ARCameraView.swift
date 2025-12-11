@@ -3,18 +3,22 @@
 //  Moheetik
 //
 //  Created by yumii on 01/12/2025.
-//
 
 import SwiftUI
 import ARKit
+import UIKit
 
+/// Hosts the AR camera feed and links it to the view model.
 struct ARCameraView: UIViewRepresentable {
+    /// Camera view model that owns state and detections.
     @ObservedObject var vm: CameraViewModel
     
+    /// Builds the AR view and starts the session.
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal, .vertical]
+        configuration.providesAudioData = false
         arView.session.run(configuration)
         arView.session.delegate = context.coordinator
         context.coordinator.arView = arView
@@ -23,22 +27,39 @@ struct ARCameraView: UIViewRepresentable {
         return arView
     }
     
+    /// Keeps the coordinator synced with the live AR view.
     func updateUIView(_ uiView: ARSCNView, context: Context) {
         context.coordinator.arView = uiView
     }
     
+    /// Creates the AR session coordinator.
     func makeCoordinator() -> Coordinator { Coordinator(vm: vm) }
     
+    /// Handles AR session updates and ML processing.
     class Coordinator: NSObject, ARSessionDelegate {
+        /// Shared camera view model.
         var vm: CameraViewModel
+        /// Counts frames to throttle ML.
         var frameCounter = 0
+        /// Forces the next ML pass.
+        var forceNextInference = false
+        /// Prevents piling up frames while ML is busy.
+        private var isProcessingFrame = false
+        /// Tracks target lock fingerprint.
         let targetLock = TargetLockManager()
+        /// Persists IDs across frames.
         let sessionTracker = SessionIDTracker()
+        /// Latest camera buffer for color sampling.
         var currentPixelBuffer: CVPixelBuffer?
+        /// Live AR view for projections and hits.
         weak var arView: ARSCNView?
+        /// Current locked anchor if any.
         var lockedAnchor: ARAnchor?
+        /// Bounding box waiting for anchor placement.
         var pendingAnchorCreation: CGRect?
+        /// Class name tied to pending anchor.
         var pendingClassName: String?
+        /// Retry counter for anchor creation.
         var anchorCreationAttempts: Int = 0
         init(vm: CameraViewModel) { self.vm = vm }
         
@@ -63,15 +84,24 @@ struct ARCameraView: UIViewRepresentable {
             if let arView = arView {
                 let configuration = ARWorldTrackingConfiguration()
                 configuration.planeDetection = [.horizontal, .vertical]
+                configuration.providesAudioData = false
                 arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
                 print("🔄 ARSession fully reset")
             }
         }
         
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            // OPTIMIZATION: Stop all processing if the user is speaking to prevent lag
+            if vm.speechManager.isRecording {
+                return
+            }
             guard vm.state == .recording else { return }
+            guard UIApplication.shared.applicationState == .active else { return }
+            guard !SpeechManager.shared.isRecording || vm.requestImmediateInference else { return }
+            guard !isProcessingFrame else { return }
             
             frameCounter += 1
+            if frameCounter % 2 != 0 { return }
             
             if let anchor = lockedAnchor {
                 trackAnchor(anchor, frame: frame)
@@ -81,30 +111,40 @@ struct ARCameraView: UIViewRepresentable {
                 tryCreateAnchor(for: boundingBox, frame: frame)
             }
             
-            guard frameCounter % 8 == 0 else { return }
-            
-            let orientation = getExifOrientation()
-            let pixelBuffer = frame.capturedImage
-            currentPixelBuffer = pixelBuffer
-            
-            var requests: [VNCoreMLRequest] = []
-            if let yolo = vm.yoloRequest { requests.append(yolo) }
-            if let moheetik = vm.moheetikRequest { requests.append(moheetik) }
-            
-            guard !requests.isEmpty else { return }
-            
-            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation)
-            try? handler.perform(requests)
-            
-            var combinedResults: [VNRecognizedObjectObservation] = []
-            if let yoloResults = vm.yoloRequest?.results as? [VNRecognizedObjectObservation] {
-                combinedResults.append(contentsOf: yoloResults)
-            }
-            if let moheetikResults = vm.moheetikRequest?.results as? [VNRecognizedObjectObservation] {
-                combinedResults.append(contentsOf: moheetikResults)
+            if forceNextInference {
+                forceNextInference = false
+            } else if vm.requestImmediateInference {
+                vm.requestImmediateInference = false
+            } else {
+                guard frameCounter % 20 == 0 else { return }
             }
             
-            self.processResults(combinedResults, frame: frame)
+            isProcessingFrame = true
+            autoreleasepool {
+                let orientation = getExifOrientation()
+                let pixelBuffer = frame.capturedImage
+                currentPixelBuffer = pixelBuffer
+                
+                var requests: [VNCoreMLRequest] = []
+                if let yolo = vm.yoloRequest { requests.append(yolo) }
+                if let moheetik = vm.moheetikRequest { requests.append(moheetik) }
+                
+                guard !requests.isEmpty else { return }
+                
+                let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation)
+                try? handler.perform(requests)
+                
+                var combinedResults: [VNRecognizedObjectObservation] = []
+                if let yoloResults = vm.yoloRequest?.results as? [VNRecognizedObjectObservation] {
+                    combinedResults.append(contentsOf: yoloResults)
+                }
+                if let moheetikResults = vm.moheetikRequest?.results as? [VNRecognizedObjectObservation] {
+                    combinedResults.append(contentsOf: moheetikResults)
+                }
+                
+                self.processResults(combinedResults, frame: frame)
+                self.isProcessingFrame = false
+            }
         }
         
         
@@ -243,6 +283,8 @@ struct ARCameraView: UIViewRepresentable {
                     self.vm.detectedObjects = [anchorObject]
                 } else if isVisible && !shouldShowOverlay {
                     self.vm.detectedObjects = []
+                } else if !isVisible {
+                    self.vm.detectedObjects = []
                 }
             }
         }
@@ -257,7 +299,7 @@ struct ARCameraView: UIViewRepresentable {
         }
         
         func processResults(_ results: [VNRecognizedObjectObservation], frame: ARFrame) {
-            let filtered = results.filter { $0.confidence > 0.7 }
+            let filtered = results.filter { $0.confidence > 0.4 }
             let yoloBoxes = filtered.map { $0.boundingBox }
             let yoloClasses = filtered.map { $0.labels.first?.identifier ?? "unknown" }
             
@@ -268,6 +310,7 @@ struct ARCameraView: UIViewRepresentable {
                     if self.lockedAnchor == nil {
                         self.vm.updateDetections([])
                     }
+                    self.vm.stopSpeakingImmediate()
                 }
                 return
             }

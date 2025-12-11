@@ -5,32 +5,57 @@
 import Foundation
 import CoreGraphics
  
+/// Tracks and maintains a locked target across frames.
 final class TargetLockManager {
    
+    /// True when a target is locked.
     private(set) var isLocked: Bool = false
+    /// True when trying to relock after loss.
     private(set) var isSearching: Bool = false
+    /// Class name of the locked target.
     private(set) var targetClassName: String?
+    /// Display name of the locked target.
     private(set) var targetDisplayName: String?
+    /// Last seen box of the target.
     private var lastBoundingBox: CGRect?
+    /// Last center point of the target.
     private var lastCenter: CGPoint?
+    /// Predicted next center for smoothing.
     private var predictedCenter: CGPoint?
+    /// Predicted next box for smoothing.
     private var predictedBox: CGRect?
+    /// Smoothed motion vector.
     private var velocity: CGPoint = .zero
+    /// Last size (area) of the box.
     private var lastSize: CGFloat = 0
+    /// Stored color for relock (R).
     private var lockedColorR: CGFloat = 0
+    /// Stored color for relock (G).
     private var lockedColorG: CGFloat = 0
+    /// Stored color for relock (B).
     private var lockedColorB: CGFloat = 0
+    /// True when color is available for relock.
     private var hasColorFingerprint: Bool = false
+    /// Frames since target was last seen.
     private var framesLost: Int = 0
+    /// Max frames tolerated before giving up.
     private let maxLostFrames: Int = 5
+    /// Minimum score to accept a match.
     private let minScoreThreshold: CGFloat = 0.25
+    /// Allowed center shift for a match.
     private let maxCenterDistanceForMatch: CGFloat = 0.5
+    /// Allowed size change ratio for match.
     private let maxSizeChangeRatio: CGFloat = 3.0
+    /// Dampens velocity over time.
     private let velocityDecay: CGFloat = 0.7
+    /// Max allowed color difference for relock.
     private let maxColorDifference: CGFloat = 0.15
+    /// Stricter color threshold for relock.
     private let relockColorThreshold: CGFloat = 0.10
+    /// How many frames to try color-only relock.
     private let maxSearchFrames: Int = 30
     
+    /// Saves target info and marks it as locked.
     func lockTarget(displayName: String, className: String, boundingBox: CGRect,
                     colorR: CGFloat = 0, colorG: CGFloat = 0, colorB: CGFloat = 0) {
         isLocked = true
@@ -60,6 +85,7 @@ final class TargetLockManager {
         lastSize = 0
     }
     
+    /// Clears all lock info and returns to idle.
     func unlock() {
         isLocked = false
         isSearching = false
@@ -78,6 +104,7 @@ final class TargetLockManager {
         hasColorFingerprint = false
     }
     
+    /// Attempts to match the locked target in new detections.
     func findLockedTarget(among candidates: [(box: CGRect, index: Int, r: CGFloat, g: CGFloat, b: CGFloat)]) -> Int? {
         if isSearching && !isLocked {
             return tryColorOnlyRelock(candidates: candidates)
@@ -92,16 +119,17 @@ final class TargetLockManager {
         updatePrediction()
         
         let referenceBox = predictedBox ?? lastBox
-        let colorValidCandidates: [(box: CGRect, index: Int, r: CGFloat, g: CGFloat, b: CGFloat)]
-        if hasColorFingerprint {
-            colorValidCandidates = candidates.filter { candidate in
-                let colorDiff = colorDistance(r1: lockedColorR, g1: lockedColorG, b1: lockedColorB,
-                                              r2: candidate.r, g2: candidate.g, b2: candidate.b)
-                return colorDiff <= maxColorDifference
+        let colorValidCandidates: [(box: CGRect, index: Int, r: CGFloat, g: CGFloat, b: CGFloat)] = {
+            if hasColorFingerprint {
+                return candidates.filter { candidate in
+                    let colorDiff = colorDistance(r1: lockedColorR, g1: lockedColorG, b1: lockedColorB,
+                                                  r2: candidate.r, g2: candidate.g, b2: candidate.b)
+                    return colorDiff <= maxColorDifference
+                }
+            } else {
+                return candidates
             }
-        } else {
-            colorValidCandidates = candidates
-        }
+        }()
         
         guard !colorValidCandidates.isEmpty else {
             handleLostFrame()
@@ -130,6 +158,7 @@ final class TargetLockManager {
         return nil
     }
     
+    /// Uses only color to relock when tracking is lost.
     private func tryColorOnlyRelock(candidates: [(box: CGRect, index: Int, r: CGFloat, g: CGFloat, b: CGFloat)]) -> Int? {
         framesLost += 1
         if framesLost > maxSearchFrames {
@@ -166,6 +195,7 @@ final class TargetLockManager {
         return nil
     }
     
+    /// Computes simple color distance between two samples.
     private func colorDistance(r1: CGFloat, g1: CGFloat, b1: CGFloat,
                                r2: CGFloat, g2: CGFloat, b2: CGFloat) -> CGFloat {
         let dr = r1 - r2
@@ -187,6 +217,7 @@ final class TargetLockManager {
     }
     
     
+    /// Scores how well a candidate box matches the last target.
     private func calculateMatchScore(candidate: CGRect, referenceBox: CGRect) -> CGFloat {
         let iou = calculateIoU(rect1: candidate, rect2: referenceBox)
         let candidateCenter = candidate.centerPoint
@@ -199,6 +230,7 @@ final class TargetLockManager {
         return iou * 0.6 + centerScore * 0.3 + sizeScore * 0.1
     }
     
+    /// Computes overlap score between two boxes.
     private func calculateIoU(rect1: CGRect, rect2: CGRect) -> CGFloat {
         let intersection = rect1.intersection(rect2)
         if intersection.isNull { return 0 }
@@ -207,6 +239,7 @@ final class TargetLockManager {
         return unionArea > 0 ? intersectionArea / unionArea : 0
     }
     
+    /// Updates stored target state after a successful match.
     private func updateTrackingState(newBox: CGRect) {
         let newCenter = newBox.centerPoint
         
@@ -226,6 +259,7 @@ final class TargetLockManager {
         lastSize = newBox.calculatedArea
     }
     
+    /// Predicts next box position based on velocity.
     private func updatePrediction() {
         guard let center = lastCenter, let box = lastBoundingBox else { return }
         predictedCenter = CGPoint(
@@ -235,6 +269,7 @@ final class TargetLockManager {
         predictedBox = box.offsetBy(dx: velocity.x, dy: velocity.y)
     }
     
+    /// Handles bookkeeping when the target is not found in a frame.
     private func handleLostFrame() {
         framesLost += 1
         
