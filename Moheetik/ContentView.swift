@@ -6,16 +6,71 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
+    
+    @AppStorage("hasSeenTutorial") var hasSeenTutorial: Bool = false
+    @State private var isMicrophoneHelpActive: Bool = false
+    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             FullCameraView()
+                .accessibilityHidden(!hasSeenTutorial)
+            
         }
+        .onAppear {
+            hasSeenTutorial = false
+        }
+        .overlay(
+            Group {
+                if !hasSeenTutorial {
+                    if #available(iOS 15.0, *) {
+                        TutorialOverlay(onDismiss: {
+                            withAnimation {
+                                hasSeenTutorial = true
+                            }
+                        })
+                        .accessibilityViewIsModal(true)
+                    } else {
+                        TutorialOverlay(onDismiss: {
+                            withAnimation {
+                                hasSeenTutorial = true
+                            }
+                        })
+                    }
+                }
+            }
+        )
     }
 }
+
+private struct ModalAccessibilityView: UIViewRepresentable {
+    let isModal: Bool
+    
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isAccessibilityElement = false
+        view.accessibilityViewIsModal = isModal
+        view.isHidden = true
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        uiView.accessibilityViewIsModal = isModal
+    }
+}
+
+extension View {
+    func accessibilityViewIsModal(_ isModal: Bool) -> some View {
+        background(
+            ModalAccessibilityView(isModal: isModal)
+                .allowsHitTesting(false)
+        )
+    }
+}
+
 #Preview {
     ContentView()
 }
- 

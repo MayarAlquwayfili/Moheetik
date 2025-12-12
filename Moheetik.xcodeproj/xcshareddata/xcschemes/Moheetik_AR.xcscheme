@@ -18,7 +18,7 @@
                BlueprintIdentifier = "2E2385D92EE2163D003153FC"
                BuildableName = "Moheetik.app"
                BlueprintName = "Moheetik"
-               ReferencedContainer = "container:AR_Moheetik.xcodeproj">
+               ReferencedContainer = "container:Moheetik.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -47,7 +47,7 @@
             BlueprintIdentifier = "2E2385D92EE2163D003153FC"
             BuildableName = "Moheetik.app"
             BlueprintName = "Moheetik"
-            ReferencedContainer = "container:AR_Moheetik.xcodeproj">
+            ReferencedContainer = "container:Moheetik.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -57,16 +57,15 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2E2385D92EE2163D003153FC"
             BuildableName = "Moheetik.app"
             BlueprintName = "Moheetik"
-            ReferencedContainer = "container:AR_Moheetik.xcodeproj">
+            ReferencedContainer = "container:Moheetik.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </MacroExpansion>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

@@ -842,6 +842,7 @@ struct FullCameraView: View {
                                 .accessibilityLabel(LocalizationManager.localizeStatus(vm.speechManager.isRecording ? "Stop Listening" : "Voice Command"))
                                 .disabled(vm.state == .idle)
                                 .opacity(vm.state == .idle ? 0 : 1)
+                                .accessibilityHidden(vm.state == .idle)
                                 
                                 Button(action: { vm.mainButtonTapped() }) {
                                     ZStack {
@@ -855,7 +856,7 @@ struct FullCameraView: View {
                                 
                                 ZStack { Circle().fill(Color.black).frame(width: 50, height: 50) }
                                     .opacity(0)
-                                    .accessibilityHidden(true)
+                                    .accessibilityHidden(vm.state == .idle)
                             }
                             .padding(.top, 20)
                             .padding(.bottom, 20)

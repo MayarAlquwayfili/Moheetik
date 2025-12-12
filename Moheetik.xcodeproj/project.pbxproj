@@ -94,7 +94,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 2E2385D52EE2163D003153FC /* Build configuration list for PBXProject "AR_Moheetik" */;
+			buildConfigurationList = 2E2385D52EE2163D003153FC /* Build configuration list for PBXProject "Moheetik" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -270,6 +270,7 @@
 				DEVELOPMENT_TEAM = 65WKCCK99N;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Required to scan your surroundings and track objects.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Required to listen to your voice commands.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Required to process and understand your speech.";
@@ -278,13 +279,14 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.mayar.Moheetik;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Mayar.Moheetik;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -306,6 +308,7 @@
 				DEVELOPMENT_TEAM = 65WKCCK99N;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Required to scan your surroundings and track objects.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Required to listen to your voice commands.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Required to process and understand your speech.";
@@ -314,13 +317,14 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.mayar.Moheetik;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Mayar.Moheetik;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -335,7 +339,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		2E2385D52EE2163D003153FC /* Build configuration list for PBXProject "AR_Moheetik" */ = {
+		2E2385D52EE2163D003153FC /* Build configuration list for PBXProject "Moheetik" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				2E2385E32EE2163E003153FC /* Debug */,
