@@ -91,7 +91,7 @@ struct ARCameraView: UIViewRepresentable {
         }
         
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            // OPTIMIZATION: Stop all processing if the user is speaking to prevent lag
+            /// Stop all processing if the user is speaking to prevent lag
             if vm.speechManager.isRecording {
                 return
             }
@@ -303,7 +303,7 @@ struct ARCameraView: UIViewRepresentable {
             let yoloBoxes = filtered.map { $0.boundingBox }
             let yoloClasses = filtered.map { $0.labels.first?.identifier ?? "unknown" }
             
-            // CRITICAL: If no objects detected, immediately clear stale data
+            /// If no objects detected, immediately clear stale data
             if filtered.isEmpty {
                 DispatchQueue.main.async {
                     self.vm.updateYOLODetections(boxes: [], classNames: [])
@@ -371,7 +371,7 @@ struct ARCameraView: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.vm.updateYOLODetections(boxes: finalBoxes, classNames: finalClasses)
                 
-                // Skip if anchor is active
+                /// Skip if anchor is active
                 if self.lockedAnchor != nil {
                     return
                 }

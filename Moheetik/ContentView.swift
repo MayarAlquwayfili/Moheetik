@@ -26,20 +26,12 @@ struct ContentView: View {
         .overlay(
             Group {
                 if !hasSeenTutorial {
-                    if #available(iOS 15.0, *) {
-                        TutorialOverlay(onDismiss: {
-                            withAnimation {
-                                hasSeenTutorial = true
-                            }
-                        })
-                        .accessibilityViewIsModal(true)
-                    } else {
-                        TutorialOverlay(onDismiss: {
-                            withAnimation {
-                                hasSeenTutorial = true
-                            }
-                        })
-                    }
+                    TutorialOverlay(onDismiss: {
+                        withAnimation {
+                            hasSeenTutorial = true
+                        }
+                    })
+                    .accessibilityViewIsModal(true)
                 }
             }
         )

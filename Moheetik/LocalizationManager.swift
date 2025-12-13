@@ -15,36 +15,30 @@ enum AppLanguage: String {
 
 /// Controls language detection and Arabic translations.
 struct LocalizationManager {
-    /// Shared instance for convenience.
     static let shared = LocalizationManager()
     
     /// Current app language, refreshed via `refreshLanguage()`.
     static private(set) var currentLanguage: AppLanguage = .english
-    
     /// Convenience flag for Arabic.
     static var isArabic: Bool { currentLanguage == .arabic }
-    
     /// Builds the manager and sets the initial language.
     private init() {
         LocalizationManager.refreshLanguage()
     }
     
-    /// Instance convenience to avoid static-call warnings from instance usage.
     func refresh(locale: Locale = .current) {
         LocalizationManager.refreshLanguage(locale: locale)
     }
     
-    /// Refresh language based on system locale / preferred languages.
     /// Checks the device locale and sets Arabic or English.
     static func refreshLanguage(locale: Locale = .current) {
         let detectedCode = detectLanguageCode(locale: locale)
         currentLanguage = detectedCode == "ar" ? .arabic : .english
         
         let systemLocale = locale.identifier
-        print("🌎 DEBUG: System Locale Read: \(systemLocale), Setting isArabic: \(isArabic)")
+        print("DEBUG: System Locale Read: \(systemLocale), Setting isArabic: \(isArabic)")
     }
     
-    /// Best-effort language code detection (uses preferred languages first).
     /// Tries to find the best language code from system settings.
     private static func detectLanguageCode(locale: Locale) -> String {
         if let preferred = Locale.preferredLanguages.first {
@@ -268,7 +262,6 @@ struct LocalizationManager {
     }
     
     /// Localize status/general phrases, then apply object-name localization for speech/UI.
-    /// Localizes status text then object names for speech/display.
     static func localizeOutput(_ text: String) -> String {
         let status = localizeStatus(text)
         let distance = localizeDistances(status)
@@ -318,7 +311,6 @@ struct LocalizationManager {
     ]
     
     /// Localize distance phrases like "1.5 meters away"
-    /// Localizes distance phrases and replaces decimal dot with Arabic speech.
     private static func localizeDistances(_ text: String) -> String {
         guard isArabic else { return text }
         var output = text
@@ -326,7 +318,6 @@ struct LocalizationManager {
         output = output.replacingOccurrences(of: "Almost there", with: "اقتربت من الهدف", options: .caseInsensitive)
         output = output.replacingOccurrences(of: "1 meter away", with: "متر واحد بعيداً", options: .caseInsensitive)
         
-        // Fix: Use " فاصلة " for decimals so TTS reads it clearly
         if let range = output.range(of: #"([0-9]+(\.[0-9]+)?)\s+meters away"#, options: .regularExpression) {
             let number = String(output[range]).components(separatedBy: " ").first ?? ""
             let spokenNumber = number.replacingOccurrences(of: ".", with: " فاصلة ")

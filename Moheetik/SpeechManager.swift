@@ -46,31 +46,41 @@ class SpeechManager: NSObject, ObservableObject, SFSpeechRecognizerDelegate {
     
     /// Starts the microphone to listen for commands.
     func startRecording() {
+        // Stop if a toggle is already happening
         if isToggling { return }
         isToggling = true
         DispatchQueue.main.async { self.isRecording = true }
+        // Do setup work on a background thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            // Always reset toggling when leaving
             defer {
                 DispatchQueue.main.async { self.isToggling = false }
             }
             
+            // Stop any previous recording cleanly
             self.stopRecordingInternal()
+            // Set app language for speech
             LocalizationManager.setLanguage()
+            // Update speech recognizer locale
             self.updateSpeechRecognizer()
+            // Ensure recognizer exists
             guard let recognizer = self.speechRecognizer else { return }
             
-            // Keep session active; do not deactivate on stop.
+            // Keep audio session active for recording + mixing
             try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
             try? AVAudioSession.sharedInstance().setActive(true, options: [.notifyOthersOnDeactivation])
             
+            // Create a speech request with partial results
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
             self.recognitionRequest = request
             
+            // Prepare audio input
             let inputNode = self.audioEngine.inputNode
             inputNode.removeTap(onBus: 0)
             
+            // Start recognition task and update detected text
             self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 if let result = result {
                     DispatchQueue.main.async {
@@ -79,14 +89,17 @@ class SpeechManager: NSObject, ObservableObject, SFSpeechRecognizerDelegate {
                 }
                 if error != nil || (result?.isFinal ?? false) { self?.stopRecording() }
             }
-            
+        
+            // Tap the audio engine to feed buffers into the request
             let recordingFormat = inputNode.outputFormat(forBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
                 request.append(buffer)
             }
             
+            // Start audio engine
             self.audioEngine.prepare()
             try? self.audioEngine.start()
+            // Mark recording state on main thread
             DispatchQueue.main.async {
                 self.isRecording = true
                 SpeechManager.shared.isRecording = true

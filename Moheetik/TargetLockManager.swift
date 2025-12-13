@@ -312,13 +312,16 @@ final class SessionIDTracker {
         let key = className.lowercased()
         let now = Date()
         
+        ///Try to match with known instances
         if let known = knownObjects[key], !known.isEmpty {
             var bestMatchIndex: Int? = nil
             var bestMatchDistance: CGFloat = .greatestFiniteMagnitude
             
+            /// Loop over existing objects to find close matches
             for (index, obj) in known.enumerated() {
                 let distance = hypot(center.x - obj.center.x, center.y - obj.center.y)
                 
+                /// If very close, update and return same ID
                 if distance < 0.15 {
                     knownObjects[key]![index].center = center
                     knownObjects[key]![index].size = size
@@ -327,6 +330,7 @@ final class SessionIDTracker {
                     return obj.id
                 }
                 
+                /// Track best match if within threshold and similar size
                 if distance < sameObjectThreshold && distance < bestMatchDistance {
                     let sizeRatio = size > 0 ? max(obj.size / size, size / obj.size) : 1.0
                     if sizeRatio < 4.0 {
@@ -336,6 +340,7 @@ final class SessionIDTracker {
                 }
             }
             
+            /// If best match found, update and return that ID
             if let matchIndex = bestMatchIndex {
                 let existingID = known[matchIndex].id
                 knownObjects[key]![matchIndex].center = center
@@ -346,11 +351,14 @@ final class SessionIDTracker {
             }
         }
         
+        /// Clean out stale objects before adding new
         cleanupStaleObjects(forClass: key, now: now)
         
+        /// Generate next ID counter for this class
         let nextID = (classCounters[key] ?? 0) + 1
         classCounters[key] = nextID
         
+        /// Create and store new tracked instance
         let newInstance = TrackedInstance(
             id: nextID,
             center: center,
@@ -359,6 +367,7 @@ final class SessionIDTracker {
             framesMissed: 0
         )
         
+        /// Append new instance to storage
         if knownObjects[key] == nil {
             knownObjects[key] = []
         }
@@ -368,9 +377,11 @@ final class SessionIDTracker {
     }
     
     func markFrameEnd(forClass className: String, visibleCenters: [CGPoint]) {
+        /// Normalize key and fetch known objects
         let key = className.lowercased()
         guard var known = knownObjects[key] else { return }
         
+        /// Check visibility for each known object
         for index in known.indices {
             let isVisible = visibleCenters.contains { visibleCenter in
                 let distance = hypot(visibleCenter.x - known[index].center.x,
@@ -378,6 +389,7 @@ final class SessionIDTracker {
                 return distance < sameObjectThreshold
             }
             
+            /// Increment missed frames if not visible
             if !isVisible {
                 knownObjects[key]![index].framesMissed += 1
             }
@@ -385,8 +397,10 @@ final class SessionIDTracker {
     }
     
     private func cleanupStaleObjects(forClass key: String, now: Date) {
+        /// Guard if nothing tracked for this key
         guard var known = knownObjects[key] else { return }
         
+        /// Filter out items too old or too many misses
         knownObjects[key] = known.filter { obj in
             let timeSinceLastSeen = now.timeIntervalSince(obj.lastSeen)
             return timeSinceLastSeen < maxMemoryTime && obj.framesMissed < maxMissedFrames
@@ -394,15 +408,18 @@ final class SessionIDTracker {
     }
     
     func resetSession() {
+        /// Clear all counters and known objects
         classCounters.removeAll()
         knownObjects.removeAll()
     }
     
     func currentCount(forClass className: String) -> Int {
+        /// Return current ID count for class
         return classCounters[className.lowercased()] ?? 0
     }
     
     func visibleCount(forClass className: String) -> Int {
+        /// Count objects with zero missed frames
         let key = className.lowercased()
         guard let known = knownObjects[key] else { return 0 }
         return known.filter { $0.framesMissed == 0 }.count

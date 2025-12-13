@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+/// Shared layout constants for tutorial visuals
 let tutorialCardColor = Color("MPurple")
 private let micSize: CGFloat = 50
 private let mainSize: CGFloat = 80
@@ -177,6 +178,7 @@ struct TutorialOverlay: View {
         .accessibilityHidden(true)
     }
     
+    /// Mirror FullCameraView bottom bar positioning
     @ViewBuilder
     private func bottomBarLayout<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack {
@@ -189,11 +191,13 @@ struct TutorialOverlay: View {
                 .padding(.bottom, bottomPaddingBottom)
             }
         }
+        .ignoresSafeArea()
     }
     
 }
 
 extension View {
+    /// Create inverted mask to punch holes in a layer
     @ViewBuilder func reverseMask<Mask: View>(
         alignment: Alignment = .center,
         @ViewBuilder _ mask: () -> Mask
@@ -213,6 +217,7 @@ struct TutorialCard: View {
     let description: String
     
     var body: some View {
+        /// Show step title and description together
         VStack(spacing: 8) {
             Text(title)
                 .font(.title3)

@@ -125,9 +125,9 @@ class CameraViewModel: NSObject, ObservableObject {
     /// Request to run ML immediately.
     @Published var requestImmediateInference: Bool = false
 
-    /// CoreML YOLO request.
+    /// YOLO request.
     var yoloRequest: VNCoreMLRequest?
-    /// Custom model request.
+    /// Moheetik model request.
     var moheetikRequest: VNCoreMLRequest?
     /// Callback to reset AR session.
     var onSessionReset: (() -> Void)?
@@ -146,28 +146,29 @@ class CameraViewModel: NSObject, ObservableObject {
             .store(in: &cancellables)
     }
     
-    /// Prepares the audio session for recording and playback.
     private func setupAudioSession() {
+        /// Set audio category to record and play through speaker/Bluetooth
         do {
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            /// Activate the audio session
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { print("🔊 Audio Error: \(error)") }
     }
     
-    /// Switches audio session to playback after recording.
     func resetAudioSessionForPlayback() {
+        /// Set audio category to playback and duck other sounds
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+            /// Activate the audio session
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { print("🔊 Reset Audio Error: \(error)") }
     }
 
     func playSound() {
-        // Configure session for playback
+        /// Configure session for playback
         try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
 
-        // Try to find the file
         let soundName = "mic_button_press"
         let soundExt = "mp3"
         var soundURL = Bundle.main.url(forResource: soundName, withExtension: soundExt)
@@ -190,7 +191,6 @@ class CameraViewModel: NSObject, ObservableObject {
         }
     }
     /// Both YOLOv3 and MoheetikModel.
-    /// Loads the ML models asynchronously.
     private func setupModel() async {
         let yoloTask = Task.detached(priority: .userInitiated) { () -> VNCoreMLModel? in
             do {
@@ -252,7 +252,6 @@ class CameraViewModel: NSObject, ObservableObject {
     }
 
     /// Target object name from spoken text.
-    /// Pulls a target object name from spoken text.
     private func extractTargetFromSpeech(text: String) -> String? {
         if LocalizationManager.isArabic || LocalizationManager.containsArabicCharacters(text) {
             if let arabicMatch = LocalizationManager.matchArabicCommand(text) {
@@ -314,19 +313,19 @@ class CameraViewModel: NSObject, ObservableObject {
           }
 
     private func processRecordedText() {
-        // 1. Stop playback & Get text
+        /// Stop playback & Get text
         resetAudioSessionForPlayback()
         let spokenText = speechManager.detectedText.lowercased()
         print("User said: \(spokenText)")
         
-        // 2. Check Dictionary
+        /// Check Dictionary
         if let target = extractTargetFromSpeech(text: spokenText) {
-            // Found! Start Search.
+            /// Found! Start Search.
             setTarget(target)
             lastAnnouncementTime.removeAll()
             requestImmediateInference = true
         } else {
-            // Not Found! Speak Error.
+            /// Not Found! Speak Error.
             let errorMsg = LocalizationManager.localizeStatus("Could not understand. Try 'Chair 1'.")
             speak(text: errorMsg, force: true)
         }
@@ -513,7 +512,7 @@ class CameraViewModel: NSObject, ObservableObject {
         
         guard state == .recording else { return }
         
-        // Sanity Check: If distance jumps by more than 5 meters instantly, ignore it.
+        /// Sanity Check: If distance jumps by more than 5 meters instantly, ignore it.
         if lastValidDistance > 0 && abs(distance - lastValidDistance) > 5.0 {
             return
         }
@@ -650,7 +649,6 @@ class CameraViewModel: NSObject, ObservableObject {
     
     /// Updates overlays and speaks object names when no target is active.
     func updateDetections(_ objects: [DetectedObject]) {
-        // 1. ABSOLUTE AGGRESSIVE SILENCE GUARD
         // If mic is recording, kill any speech immediately, clear visual objects, and exit.
         if speechManager.isRecording {
             if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
@@ -658,7 +656,7 @@ class CameraViewModel: NSObject, ObservableObject {
             return
         }
         
-        // 2. State Guard: Only process if we are actually recording video
+        // Only process if we are actually recording video
         guard state == .recording else { return }
         let localizedObjects = localizeObjectsIfNeeded(objects)
         self.detectedObjects = localizedObjects
@@ -670,25 +668,24 @@ class CameraViewModel: NSObject, ObservableObject {
         let labels = localizedObjects.map { $0.label }.sorted().joined(separator: ", ")
         guard !labels.isEmpty else { return }
 
-        // 1. Strict Time Check (10 seconds silence required between same/similar objects)
+        /// Strict Time Check (10 seconds silence required between same/similar objects)
         let now = Date()
         if let lastTime = lastAnnouncementTime[labels], now.timeIntervalSince(lastTime) < 10.0 { return }
 
-        // 2. Similarity Check (The "Shake" Fix)
-        // If the new list contains the old one or vice versa (e.g., "Chair" vs "Chair, Table"), TREAT AS SAME.
+        /// If the new list contains the old one or vice versa (e.g., "Chair" vs "Chair, Table"), TREAT AS SAME.
         if labels.contains(lastAnnouncedObjects) || lastAnnouncedObjects.contains(labels) {
             // Just update timestamp to keep it silent, DO NOT SPEAK
             lastAnnouncementTime[labels] = now
             return
         }
 
-        // 3. Speak only if truly new
+        /// Speak only if truly new
         lastAnnouncementTime[labels] = now
         lastAnnouncedObjects = labels
         speak(text: labels, force: false)
     }
     
-    /// Forces a "target lost" warning and clears overlays.
+    /// Target lost
     func notifyTargetLost() {
             let warning = "Target lost. Move back."
             if lastSpokenText != warning {
@@ -892,7 +889,6 @@ extension Array {
     }
 }
 
-// MARK: - Speech helpers
 private extension CameraViewModel {
     func localizeObjectsIfNeeded(_ objects: [DetectedObject]) -> [DetectedObject] {
         guard LocalizationManager.isArabic else { return objects }
@@ -903,7 +899,7 @@ private extension CameraViewModel {
         }
     }
     
-    /// Builds a speech utterance with the right language and speed.
+    /// Language and speed.
     func makeUtterance(_ text: String, forceArabic: Bool = false) -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: text)
         let useArabic = forceArabic || LocalizationManager.isArabic

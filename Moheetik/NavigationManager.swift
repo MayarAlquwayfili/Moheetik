@@ -57,17 +57,17 @@ final class NavigationManager {
         )
         let distanceMsg = getDistanceGuidance(distance: distance, now: now)
         
-        // Priority 1: Critical Turns (Left/Right/Behind)
+        // (Left/Right/Behind)
         if let dir = direction, (dir.contains("Turn") || dir.contains("behind")) {
             return LocalizationManager.localizeOutput(dir)
         }
         
-        // Priority 2: Distance (Overrides "Move forward")
+        // Distance (Overrides "Move forward")
         if let dist = distanceMsg {
             return LocalizationManager.localizeOutput(dist)
         }
         
-        // Priority 3: Move forward (Fallback)
+        // Move forward
         if let dir = direction {
             return LocalizationManager.localizeOutput(dir)
         }
@@ -205,7 +205,7 @@ final class NavigationManager {
         return formatDistance(distance)
     }
     
-    /// Formats distance into friendly speech text.
+    /// Formats distance into speech text.
     private func formatDistance(_ meters: Float) -> String {
         if meters < 1.0 {
             return "Almost there"
